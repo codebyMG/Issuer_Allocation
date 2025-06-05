@@ -49,9 +49,13 @@ def allocate_issuers(df, team_members):
                 continue
 
             # Filter members who can take this date
-            eligible_members = [m for m in team_members if len(member_dates[m]) < 3 or date in member_dates[m]]
-            if not eligible_members:
-                continue
+           eligible_members = [m for m in team_members if len(member_dates[m]) < 3 or date in member_dates[m]]
+
+# Fallback if no one qualifies under the date limit
+if not eligible_members:
+    eligible_members = team_members  # allow breaking the "max 3 dates" rule
+
+chosen = min(eligible_members, key=lambda x: team_totals[x])
 
             # Pick the one with lowest total
             chosen = min(eligible_members, key=lambda x: team_totals[x])

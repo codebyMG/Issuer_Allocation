@@ -37,10 +37,10 @@ def allocate_issuers(df, team_members):
 
     df['LEVEL'] = df['COUNTRY_DOMICILE'].apply(assign_level)
 
-    # Sort for consistent processing: by LEVEL, then by DATE_TAGGED
+    # Sort for consistent processing: by LEVEL, then by RUN_DATE
     df = df.sort_values(by=['LEVEL', 'RUN_DATE'])
 
-    # Group issuers by date
+    # Group issuers by RUN_DATE
     grouped_by_date = dict(tuple(df.groupby('RUN_DATE')))
 
     for date, group in grouped_by_date.items():
@@ -49,15 +49,13 @@ def allocate_issuers(df, team_members):
                 continue
 
             # Filter members who can take this date
-           eligible_members = [m for m in team_members if len(member_dates[m]) < 3 or date in member_dates[m]]
+            eligible_members = [m for m in team_members if len(member_dates[m]) < 3 or date in member_dates[m]]
 
-# Fallback if no one qualifies under the date limit
-if not eligible_members:
-    eligible_members = team_members  # allow breaking the "max 3 dates" rule
+            # Fallback if no one qualifies under the date limit
+            if not eligible_members:
+                eligible_members = team_members  # allow breaking the "max 3 dates" rule
 
-chosen = min(eligible_members, key=lambda x: team_totals[x])
-
-            # Pick the one with lowest total
+            # Pick the one with the lowest total workload
             chosen = min(eligible_members, key=lambda x: team_totals[x])
 
             allocation.append((

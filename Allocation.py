@@ -4,7 +4,7 @@ import pandas as pd
 # Function to scrape data from an Excel sheet
 def scrape_data_from_excel(file):
     df = pd.read_excel(file, engine='openpyxl')
-    df = df[['DMX_ISSUER_ID', 'DMX_ISSUER_NAME', 'TOTAL', 'COUNTRY_DOMICILE', 'DATE_TAGGED']]
+    df = df[['DMX_ISSUER_ID', 'DMX_ISSUER_NAME', 'TOTAL', 'COUNTRY_DOMICILE', 'RUN_DATE']]
     return df
 
 # Function to allocate issuers to team members with date constraints
@@ -38,10 +38,10 @@ def allocate_issuers(df, team_members):
     df['LEVEL'] = df['COUNTRY_DOMICILE'].apply(assign_level)
 
     # Sort for consistent processing: by LEVEL, then by DATE_TAGGED
-    df = df.sort_values(by=['LEVEL', 'DATE_TAGGED'])
+    df = df.sort_values(by=['LEVEL', 'RUN_DATE'])
 
     # Group issuers by date
-    grouped_by_date = dict(tuple(df.groupby('DATE_TAGGED')))
+    grouped_by_date = dict(tuple(df.groupby('RUN_DATE')))
 
     for date, group in grouped_by_date.items():
         for index, row in group.iterrows():
@@ -61,7 +61,7 @@ def allocate_issuers(df, team_members):
                 row['DMX_ISSUER_NAME'],
                 row['TOTAL'],
                 row['COUNTRY_DOMICILE'],
-                row['DATE_TAGGED'],
+                row['RUN_DATE'],
                 chosen
             ))
 
@@ -71,7 +71,7 @@ def allocate_issuers(df, team_members):
 
     allocation_df = pd.DataFrame(
         allocation,
-        columns=['DMX_ISSUER_ID', 'DMX_ISSUER_NAME', 'TOTAL', 'COUNTRY_DOMICILE', 'DATE_TAGGED', 'Team_Member']
+        columns=['DMX_ISSUER_ID', 'DMX_ISSUER_NAME', 'TOTAL', 'COUNTRY_DOMICILE', 'RUN_DATE', 'Team_Member']
     )
     return allocation_df
 
@@ -84,7 +84,7 @@ def validate_allocation(allocation_df, team_members):
     for member in team_members:
         member_total = allocation_df[allocation_df['Team_Member'] == member]['TOTAL'].sum()
         difference_from_average = member_total - average_points_per_member
-        unique_dates = allocation_df[allocation_df['Team_Member'] == member]['DATE_TAGGED'].nunique()
+        unique_dates = allocation_df[allocation_df['Team_Member'] == member]['RUN_DATE'].nunique()
 
         validation_results[member] = {
             'Total': member_total,

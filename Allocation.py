@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from collections import defaultdict
 
 # Function to scrape data from an Excel sheet
 def scrape_data_from_excel(file):
@@ -7,77 +8,98 @@ def scrape_data_from_excel(file):
     df = df[['DMX_ISSUER_ID', 'DMX_ISSUER_NAME', 'TOTAL', 'COUNTRY_DOMICILE', 'RUN_DATE']]
     return df
 
-# Function to allocate issuers to team members with date constraints
-def allocate_issuers(df, team_members):
+# Main allocation function based on run-date wise round-robin
+def allocate_run_date_round_robin(df, team_members):
     team_totals = {member: 0 for member in team_members}
     member_dates = {member: set() for member in team_members}
     allocation = []
     allocated_issuers = set()
 
-    level_1_countries = ['AU', 'CA', 'GB', 'HK', 'IE', 'MY', 'NZ', 'SG']
-    level_2_countries = ['AE', 'AR', 'AT', 'AZ', 'BE', 'BF', 'BG', 'BH', 'BM', 'BS', 'CH', 'CL', 'CO', 'CR', 'CY', 'CZ',
-                         'DE', 'DK', 'EE', 'ES', 'FI', 'FO', 'FR', 'GE', 'GG', 'GI', 'GR', 'HR', 'HU', 'ID', 'IL',
-                         'IM', 'IN', 'JE', 'KE', 'KW', 'KY', 'KZ', 'LI', 'LT', 'LU', 'MA', 'MC', 'MN', 'MO',
-                         'MT', 'MU', 'MX', 'NG', 'NL', 'NO', 'OM', 'PA', 'PE', 'PH', 'PK', 'PL', 'PR', 'PT', 'QA', 'RO',
-                         'SA', 'SE', 'SK', 'SN', 'SV', 'TG', 'TH', 'TN', 'UA', 'UY', 'VG', 'PG', 'CI']
-    level_3_countries = ['BR', 'CN', 'EG', 'IT', 'RU', 'TR', 'TW', 'ZA', 'IS']
-
-    # Assign priority levels
-    def assign_level(country):
-        if country == 'US':
-            return 0
-        elif country in level_1_countries:
-            return 1
-        elif country in level_2_countries:
-            return 2
-        elif country in level_3_countries:
-            return 3
-        else:
-            return 4
-
-    df['LEVEL'] = df['COUNTRY_DOMICILE'].apply(assign_level)
-
-    # Sort for consistent processing: by LEVEL, then by RUN_DATE
-    df = df.sort_values(by=['LEVEL', 'RUN_DATE'])
-
     # Group issuers by RUN_DATE
-    grouped_by_date = dict(tuple(df.groupby('RUN_DATE')))
+    grouped_by_date = df.groupby('RUN_DATE')
 
-    for date, group in grouped_by_date.items():
-        for index, row in group.iterrows():
-            if row['DMX_ISSUER_ID'] in allocated_issuers:
-                continue
+    for run_date, group in grouped_by_date:
+        issuers = group.sort_values(by='TOTAL', ascending=False).to_dict(orient='records')
+        member_index = 0
 
-            # Filter members who can take this date
-            eligible_members = [m for m in team_members if len(member_dates[m]) < 3 or date in member_dates[m]]
+        for issuer in issuers:
+            # Sort members by fewest run dates, then by total points
+            sorted_members = sorted(
+                team_members,
+                key=lambda m: (len(member_dates[m]), team_totals[m])
+            )
 
-            # Fallback if no one qualifies under the date limit
-            if not eligible_members:
-                eligible_members = team_members  # allow breaking the "max 3 dates" rule
-
-            # Pick the one with the lowest total workload
-            chosen = min(eligible_members, key=lambda x: team_totals[x])
+            # Pick member in round-robin style
+            member = sorted_members[member_index % len(team_members)]
+            member_index += 1
 
             allocation.append((
-                row['DMX_ISSUER_ID'],
-                row['DMX_ISSUER_NAME'],
-                row['TOTAL'],
-                row['COUNTRY_DOMICILE'],
-                row['RUN_DATE'],
-                chosen
+                issuer['DMX_ISSUER_ID'],
+                issuer['DMX_ISSUER_NAME'],
+                issuer['TOTAL'],
+                issuer['COUNTRY_DOMICILE'],
+                issuer['RUN_DATE'],
+                member
             ))
 
-            team_totals[chosen] += row['TOTAL']
-            member_dates[chosen].add(date)
-            allocated_issuers.add(row['DMX_ISSUER_ID'])
+            team_totals[member] += issuer['TOTAL']
+            member_dates[member].add(issuer['RUN_DATE'])
+            allocated_issuers.add(issuer['DMX_ISSUER_ID'])
 
+    return allocation
+
+# Full allocation logic
+def allocate_issuers(df, team_members):
+    us_issuers = df[df['COUNTRY_DOMICILE'] == 'US']
+    non_us_issuers = df[df['COUNTRY_DOMICILE'] != 'US']
+
+    allocation = []
+
+    # Allocate US issuers
+    us_allocation = allocate_run_date_round_robin(us_issuers, team_members)
+    allocation.extend(us_allocation)
+
+    # Recalculate running totals and run dates before next phase
+    team_totals = defaultdict(int)
+    member_dates = defaultdict(set)
+    for _, _, total, _, run_date, member in us_allocation:
+        team_totals[member] += total
+        member_dates[member].add(run_date)
+
+    # Allocate non-US issuers using the same logic
+    grouped_by_date = non_us_issuers.groupby('RUN_DATE')
+    for run_date, group in grouped_by_date:
+        issuers = group.sort_values(by='TOTAL', ascending=False).to_dict(orient='records')
+        member_index = 0
+
+        for issuer in issuers:
+            sorted_members = sorted(
+                team_members,
+                key=lambda m: (len(member_dates[m]), team_totals[m])
+            )
+            member = sorted_members[member_index % len(team_members)]
+            member_index += 1
+
+            allocation.append((
+                issuer['DMX_ISSUER_ID'],
+                issuer['DMX_ISSUER_NAME'],
+                issuer['TOTAL'],
+                issuer['COUNTRY_DOMICILE'],
+                issuer['RUN_DATE'],
+                member
+            ))
+
+            team_totals[member] += issuer['TOTAL']
+            member_dates[member].add(run_date)
+
+    # Final DataFrame
     allocation_df = pd.DataFrame(
         allocation,
         columns=['DMX_ISSUER_ID', 'DMX_ISSUER_NAME', 'TOTAL', 'COUNTRY_DOMICILE', 'RUN_DATE', 'Team_Member']
     )
     return allocation_df
 
-# Function to validate the allocation
+# Validation function
 def validate_allocation(allocation_df, team_members):
     total_points = allocation_df['TOTAL'].sum()
     average_points_per_member = total_points / len(team_members)
@@ -97,8 +119,8 @@ def validate_allocation(allocation_df, team_members):
         }
     return validation_results, average_points_per_member
 
-# Streamlit Interface
-st.title("Issuer Allocation System with Date Constraint")
+# Streamlit UI
+st.title("Issuer Allocation System - Run Date Wise & Balanced")
 
 uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 team_input = st.text_input("Enter Team Members (comma-separated):")
